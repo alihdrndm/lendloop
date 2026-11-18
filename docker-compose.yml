@@ -1,0 +1,32 @@
+# n8n for LendLoop's automations. `docker compose up -d` imports and publishes
+# the workflows in n8n/workflows on every start, so the running workflows always
+# match the repository.
+services:
+  n8n:
+    image: n8nio/n8n:2.48.5
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    env_file:
+      - ./n8n/.env
+    environment:
+      GENERIC_TIMEZONE: UTC
+      TZ: UTC
+      # Code nodes read secrets and URLs from the container environment...
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # ...and use Node's crypto module for HMAC signing.
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+    extra_hosts:
+      # Lets the container reach the Convex dev backend running on the host.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/lendloop/workflows:ro
+      - ./n8n/start.sh:/lendloop/start.sh:ro
+    entrypoint: ["tini", "--", "sh", "/lendloop/start.sh"]
+
+volumes:
+  n8n_data:
