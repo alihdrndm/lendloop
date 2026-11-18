@@ -1,0 +1,335 @@
+{
+  "id": "lendloopRequests",
+  "name": "LendLoop: request notification",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lendloop-request",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "24c5d088-2c9b-5b8e-961b-c3776f44d57a",
+      "name": "Convex webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "6f2b4a0e-1c3d-4e5f-9a7b-8c9d0e1f2a3b"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Reject anything not signed by Convex with LENDLOOP_N8N_SECRET, or older than 5 minutes.\nconst crypto = require('crypto');\nconst item = $input.first().json;\nconst headers = item.headers || {};\nconst timestamp = headers['x-lendloop-timestamp'];\nconst signature = String(headers['x-lendloop-signature'] || '').toLowerCase();\nconst payload = item.body && item.body.payload;\nconst secret = $env.LENDLOOP_N8N_SECRET;\n\nlet reason = 'missing';\nif (secret && timestamp && signature && typeof payload === 'string') {\n  const age = Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp));\n  if (!Number.isFinite(age) || age > 300) {\n    reason = 'stale';\n  } else {\n    const expected = crypto.createHmac('sha256', secret).update(`${timestamp}.${payload}`).digest('hex');\n    const ok =\n      expected.length === signature.length &&\n      crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));\n    reason = ok ? 'ok' : 'mismatch';\n  }\n}\nif (reason !== 'ok') console.warn(`[lendloop] rejected webhook: ${reason}`);\nreturn [{ json: { valid: reason === 'ok', reason, event: reason === 'ok' ? JSON.parse(payload) : null } }];\n"
+      },
+      "id": "e85f8e7a-c8f1-57bc-94db-26aa360e74eb",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2ae1cb13-735c-5d7a-ae5c-8d9e79d5360a",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0b903e39-1204-54ec-8a0a-3dac1ecf5498",
+      "name": "Signature valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { error: 'invalid signature' } }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "9c44daef-569c-58cd-ab20-69173348e9ef",
+      "name": "Reject 401",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const day = (d) =>\n  new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });\n\n// Only what the message needs: first names, the tool and the dates. No emails in logs.\nconst e = $input.first().json.event;\nconst when = `${day(e.startDate)} to ${day(e.endDate)}`;\nconst to = e.recipient.firstName;\nconst lines = {\n  requested: `Hi ${to}, ${e.otherPartyFirstName} would like to borrow your ${e.toolName} (${when}).`,\n  approved: `Hi ${to}, good news: ${e.otherPartyFirstName} approved your request for the ${e.toolName} (${when}).`,\n  declined: `Hi ${to}, ${e.otherPartyFirstName} can't lend the ${e.toolName} for ${when} this time.`,\n  cancelled: `Hi ${to}, the request for the ${e.toolName} (${when}) was cancelled.`,\n  returned: `Hi ${to}, the ${e.toolName} is marked as returned. Thanks for being part of the loop!`,\n};\nconst text = lines[e.status] || `Hi ${to}, there is an update on the ${e.toolName}.`;\n// The logged mock notification: always written to the n8n log, and to Discord when configured.\nconsole.log(`[lendloop] notify ${to} (${e.status}): ${text}`);\nreturn [{ json: { text, eventId: e.eventId, loanId: e.loanId, status: e.status } }];\n"
+      },
+      "id": "ade066fb-62f8-57e1-96f2-0c03052076a0",
+      "name": "Compose message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "36509c97-ac33-5a7b-b5bc-0436e84db084",
+              "leftValue": "={{ !!$env.DISCORD_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "09fa78ab-f7f5-53e6-99c7-2cb29c8c0bea",
+      "name": "Discord configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $json.text }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "09280806-ddb1-5bc3-9c09-4b7fddfe767a",
+      "name": "Post to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        100
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Same scheme as convex/lib/hmac.ts: hex(HMAC_SHA256(secret, `${timestamp}.${body}`)).\nconst crypto = require('crypto');\nconst sign = (body) => {\n  const timestamp = String(Math.floor(Date.now() / 1000));\n  const signature = crypto\n    .createHmac('sha256', $env.LENDLOOP_CONVEX_SECRET)\n    .update(`${timestamp}.${body}`)\n    .digest('hex');\n  return { timestamp, signature };\n};\n\nconst msg = $('Compose message').first().json;\nconst body = JSON.stringify({\n  loanId: msg.loanId,\n  kind: 'request_notification',\n  status: 'sent',\n  channel: $env.DISCORD_WEBHOOK_URL ? 'discord' : 'log',\n  idempotencyKey: msg.eventId, // req:<loanId>:<status>, the same on every retry\n  detail: `Told the ${msg.status === 'requested' ? 'lender' : 'borrower'} (${msg.status})`,\n});\nreturn [{ json: { body, ...sign(body) } }];\n"
+      },
+      "id": "93ca7f5a-1240-5a24-a982-560d22f6c702",
+      "name": "Sign write-back",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LENDLOOP_CONVEX_SITE_URL }}/automation-events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lendloop-timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "x-lendloop-signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}"
+      },
+      "id": "e42a4309-6c55-533e-8200-d8bf0f98862b",
+      "name": "Write back to Convex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "1e749905-2e4d-5ff1-8e6d-5de90efd212a",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Convex webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify signature": {
+      "main": [
+        [
+          {
+            "node": "Signature valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature valid?": {
+      "main": [
+        [
+          {
+            "node": "Compose message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose message": {
+      "main": [
+        [
+          {
+            "node": "Discord configured?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord configured?": {
+      "main": [
+        [
+          {
+            "node": "Post to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sign write-back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Discord": {
+      "main": [
+        [
+          {
+            "node": "Sign write-back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign write-back": {
+      "main": [
+        [
+          {
+            "node": "Write back to Convex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write back to Convex": {
+      "main": [
+        [
+          {
+            "node": "Respond 200",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "lendloopErrorsWf"
+  },
+  "pinData": {},
+  "tags": []
+}

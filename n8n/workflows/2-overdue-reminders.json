@@ -1,0 +1,332 @@
+{
+  "id": "lendloopOverdues",
+  "name": "LendLoop: overdue reminders",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "00c5e29f-468d-5dfa-a14e-dff54dc9280d",
+      "name": "Every day at 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "2ff71c7b-2a20-5334-858a-ba1441ffb942",
+      "name": "Run now (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Same scheme as convex/lib/hmac.ts: hex(HMAC_SHA256(secret, `${timestamp}.${body}`)).\nconst crypto = require('crypto');\nconst sign = (body) => {\n  const timestamp = String(Math.floor(Date.now() / 1000));\n  const signature = crypto\n    .createHmac('sha256', $env.LENDLOOP_CONVEX_SECRET)\n    .update(`${timestamp}.${body}`)\n    .digest('hex');\n  return { timestamp, signature };\n};\n\nreturn [{ json: sign('GET /overdue-loans') }];\n"
+      },
+      "id": "2dbeec3a-8876-59c9-8efe-1e8b1f986ffc",
+      "name": "Sign request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.LENDLOOP_CONVEX_SITE_URL }}/overdue-loans",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lendloop-timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "x-lendloop-signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "ed0f1b24-f511-531b-ba68-dce4625aa8cb",
+      "name": "Fetch overdue loans",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const day = (d) =>\n  new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });\n\n// One item per overdue loan. The key includes the day, so a re-run today never records a\n// second reminder, while tomorrow's run sends a new one.\nconst { today, loans } = $input.first().json;\nreturn loans.map((l) => ({\n  json: {\n    loanId: l.loanId,\n    idempotencyKey: `overdue:${l.loanId}:${today}`,\n    text: `Hi ${l.borrower.firstName}, a friendly reminder: the ${l.toolName} was due back on ${day(l.endDate)}. Could you return it when you can?`,\n  },\n}));\n"
+      },
+      "id": "2435dd50-4f6c-5e85-9a36-c9f4cf9020a9",
+      "name": "Build reminders",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "for (const item of $input.all()) console.log(`[lendloop] overdue reminder: ${item.json.text}`);\nreturn $input.all();\n"
+      },
+      "id": "d464e6cb-af63-57c0-a165-3838aae8733b",
+      "name": "Log reminders",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "36509c97-ac33-5a7b-b5bc-0436e84db084",
+              "leftValue": "={{ !!$env.DISCORD_WEBHOOK_URL }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "09fa78ab-f7f5-53e6-99c7-2cb29c8c0bea",
+      "name": "Discord configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: $json.text }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "09280806-ddb1-5bc3-9c09-4b7fddfe767a",
+      "name": "Post to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        200
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Same scheme as convex/lib/hmac.ts: hex(HMAC_SHA256(secret, `${timestamp}.${body}`)).\nconst crypto = require('crypto');\nconst sign = (body) => {\n  const timestamp = String(Math.floor(Date.now() / 1000));\n  const signature = crypto\n    .createHmac('sha256', $env.LENDLOOP_CONVEX_SECRET)\n    .update(`${timestamp}.${body}`)\n    .digest('hex');\n  return { timestamp, signature };\n};\n\n// Runs once and signs one write-back per reminder.\nreturn $('Build reminders').all().map((r) => {\n  const body = JSON.stringify({\n    loanId: r.json.loanId,\n    kind: 'overdue_reminder',\n    status: 'sent',\n    channel: $env.DISCORD_WEBHOOK_URL ? 'discord' : 'log',\n    idempotencyKey: r.json.idempotencyKey,\n    detail: 'Overdue reminder sent to the borrower',\n  });\n  return { json: { body, ...sign(body) } };\n});\n"
+      },
+      "id": "09f5cc85-cbce-5b58-b29a-7b852baa79d0",
+      "name": "Sign write-backs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        300
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LENDLOOP_CONVEX_SITE_URL }}/automation-events",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lendloop-timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "x-lendloop-signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}"
+      },
+      "id": "e42a4309-6c55-533e-8200-d8bf0f98862b",
+      "name": "Write back to Convex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "Every day at 09:00": {
+      "main": [
+        [
+          {
+            "node": "Sign request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (manual)": {
+      "main": [
+        [
+          {
+            "node": "Sign request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign request": {
+      "main": [
+        [
+          {
+            "node": "Fetch overdue loans",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch overdue loans": {
+      "main": [
+        [
+          {
+            "node": "Build reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build reminders": {
+      "main": [
+        [
+          {
+            "node": "Log reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log reminders": {
+      "main": [
+        [
+          {
+            "node": "Discord configured?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord configured?": {
+      "main": [
+        [
+          {
+            "node": "Post to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sign write-backs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Discord": {
+      "main": [
+        [
+          {
+            "node": "Sign write-backs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign write-backs": {
+      "main": [
+        [
+          {
+            "node": "Write back to Convex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "lendloopErrorsWf"
+  },
+  "pinData": {},
+  "tags": []
+}

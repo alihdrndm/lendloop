@@ -1,0 +1,97 @@
+{
+  "id": "lendloopErrorsWf",
+  "name": "LendLoop: error handler",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "f6b7b49e-fabe-5ed9-8bb0-44e7f9264d75",
+      "name": "On workflow error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Same scheme as convex/lib/hmac.ts: hex(HMAC_SHA256(secret, `${timestamp}.${body}`)).\nconst crypto = require('crypto');\nconst sign = (body) => {\n  const timestamp = String(Math.floor(Date.now() / 1000));\n  const signature = crypto\n    .createHmac('sha256', $env.LENDLOOP_CONVEX_SECRET)\n    .update(`${timestamp}.${body}`)\n    .digest('hex');\n  return { timestamp, signature };\n};\n\n// Tell Convex about the failed run so admins see it. Only where and why it failed,\n// never the payload of the failed run.\nconst { execution = {}, workflow = {} } = $input.first().json;\nconst message = `${execution.lastNodeExecuted || 'unknown node'}: ${(execution.error && execution.error.message) || 'unknown error'}`;\nconsole.error(`[lendloop] workflow \"${workflow.name}\" failed: ${message}`);\nconst body = JSON.stringify({\n  workflow: workflow.name || 'unknown',\n  message,\n  executionId: execution.id ? String(execution.id) : undefined,\n  idempotencyKey: `n8n:${execution.id || Date.now()}`,\n});\nreturn [{ json: { body, ...sign(body) } }];\n"
+      },
+      "id": "217e839a-0056-5a5a-acda-fc534f7f8258",
+      "name": "Describe failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LENDLOOP_CONVEX_SITE_URL }}/automation-failures",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-lendloop-timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "x-lendloop-signature",
+              "value": "={{ $json.signature }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}"
+      },
+      "id": "b36093c0-e775-578e-ab13-bfff33779fba",
+      "name": "Report to Convex",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "On workflow error": {
+      "main": [
+        [
+          {
+            "node": "Describe failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Describe failure": {
+      "main": [
+        [
+          {
+            "node": "Report to Convex",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "tags": []
+}
