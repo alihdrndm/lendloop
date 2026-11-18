@@ -9,6 +9,8 @@
  */
 
 import type * as automation from "../automation.js";
+import type * as http from "../http.js";
+import type * as httpHelpers from "../httpHelpers.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_domain from "../lib/domain.js";
 import type * as lib_hmac from "../lib/hmac.js";
@@ -25,6 +27,8 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   automation: typeof automation;
+  http: typeof http;
+  httpHelpers: typeof httpHelpers;
   "lib/auth": typeof lib_auth;
   "lib/domain": typeof lib_domain;
   "lib/hmac": typeof lib_hmac;
