@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p convex"
+    "typecheck": "next typegen && tsc --noEmit && tsc --noEmit -p convex",
+    "workflows": "python n8n/build-workflows.py"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.10.1",
