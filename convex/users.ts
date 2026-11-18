@@ -2,6 +2,14 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { getViewer, isAdminEmail, NotSignedIn, requireAdmin } from "./lib/auth";
 
+/** Clerk sends an empty name for email-only accounts; fall back to the email's local part. */
+function displayName(name: string | undefined, givenName: string | undefined, email: string): string {
+  const fromToken = name?.trim() || givenName?.trim();
+  if (fromToken) return fromToken;
+  const local = email.split("@")[0]?.split("+")[0] ?? "";
+  return local ? local.charAt(0).toUpperCase() + local.slice(1) : "Neighbour";
+}
+
 /** Called by the client right after sign-in. Creates or refreshes the user row. */
 export const store = mutation({
   args: {},
@@ -9,8 +17,8 @@ export const store = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new NotSignedIn();
 
-    const name = identity.name ?? identity.nickname ?? "Neighbour";
     const email = identity.email ?? "";
+    const name = displayName(identity.name, identity.givenName, email);
     const role = isAdminEmail(email) ? "admin" : "user";
 
     const existing = await getViewer(ctx);
