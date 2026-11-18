@@ -59,4 +59,15 @@ export default defineSchema({
   })
     .index("by_idempotency_key", ["idempotencyKey"])
     .index("by_loan", ["loanId"]),
+
+  // Failed automation runs, from Convex's own delivery retries or from the
+  // n8n error workflow. Visible to admins so nothing fails silently.
+  automationFailures: defineTable({
+    source: v.union(v.literal("convex"), v.literal("n8n")),
+    workflow: v.string(),
+    message: v.string(),
+    loanId: v.optional(v.id("loans")),
+    executionId: v.optional(v.string()),
+    idempotencyKey: v.string(),
+  }).index("by_idempotency_key", ["idempotencyKey"]),
 });
