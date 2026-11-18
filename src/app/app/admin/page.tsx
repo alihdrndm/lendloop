@@ -5,7 +5,7 @@ import { api } from "../../../../convex/_generated/api";
 import { LoanCard } from "@/components/loan-card";
 import { Badge, Button, Card, EmptyState, ErrorNote, Loading, PageHeader } from "@/components/ui";
 import { useRowAction } from "@/components/use-action";
-import { CATEGORY_LABELS } from "@/lib/labels";
+import { CATEGORY_LABELS, timeAgo } from "@/lib/labels";
 
 export default function AdminPage() {
   const me = useQuery(api.users.me);
@@ -14,6 +14,7 @@ export default function AdminPage() {
   const loans = useQuery(api.loans.allForAdmin, isAdmin ? {} : "skip");
   const tools = useQuery(api.tools.listForAdmin, isAdmin ? {} : "skip");
   const users = useQuery(api.users.listForAdmin, isAdmin ? {} : "skip");
+  const failures = useQuery(api.automation.recentFailures, isAdmin ? {} : "skip");
   const removeTool = useMutation(api.tools.remove);
   const setTrusted = useMutation(api.users.setTrustedLender);
   const { busy, error, run } = useRowAction<string>();
@@ -24,6 +25,23 @@ export default function AdminPage() {
   return (
     <>
       <PageHeader title="Admin" subtitle="Keep the board healthy." />
+      {failures && failures.length > 0 && (
+        <section aria-labelledby="automation-problems" className="mb-8">
+          <h2 id="automation-problems" className="mb-3 text-sm font-semibold uppercase tracking-wide text-red-700">
+            Automation problems
+          </h2>
+          <Card className="divide-y divide-line p-0">
+            {failures.map((f) => (
+              <div key={f._id} className="px-4 py-3 text-sm">
+                <p className="font-medium">
+                  {f.workflow} <span className="font-normal text-muted">· {f.source} · {timeAgo(f.at)}</span>
+                </p>
+                <p className="mt-0.5 text-muted">{f.message}</p>
+              </div>
+            ))}
+          </Card>
+        </section>
+      )}
       <div className="grid gap-8 lg:grid-cols-2">
         <section>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">Members</h2>
